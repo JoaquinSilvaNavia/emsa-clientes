@@ -225,11 +225,14 @@ function rResumen(){
   function hc(t,v){if(!heat||t==='POR VENCER'||!v)return'';const p=v/(hMax[t]||1);return p>.75?'heat-4':p>.5?'heat-3':p>.25?'heat-2':'heat-1';}
 
   const thT=TRAMOS.map(t=>`<th>${TL[t]}</th>`).join('');
-  const rows=cats.map(c=>{
-    const totC=TRAMOS.reduce((s,t)=>s+(pv2[c][t]||0),0);if(!totC)return'';
+  const rowsData=cats.map(c=>{
+    const totC=TRAMOS.reduce((s,t)=>s+(pv2[c][t]||0),0);
+    return {c, totC};
+  }).filter(x=>x.totC>0).sort((a,b)=>b.totC-a.totC);
+  const rows=rowsData.map(({c,totC})=>{
     const celdas=TRAMOS.map(t=>{const v=pv2[c][t]||0;return `<td class="${hc(t,v)}" onclick="drillC('${c}','${t}')" style="cursor:pointer">${v>0?fmtM(v):'—'}</td>`;}).join('');
     return `<tr class="clickable" onclick="addExcCat('${c}')"><td title="Clic para excluir">${c}</td>${celdas}<td style="font-weight:600">${fmtM(totC)}</td></tr>`;
-  }).filter(Boolean).join('');
+  }).join('');
 
   const tagCli=[...exCli].map(c=>`<span class="tag tag-red" onclick="rmExc('cli','${c.replace(/'/g,"\\'")}')">✕ ${c}</span>`).join('');
   const tagCat=[...exCat].map(c=>`<span class="tag tag-amb" onclick="rmExc('cat','${c.replace(/'/g,"\\'")}')">✕ ${c}</span>`).join('');
