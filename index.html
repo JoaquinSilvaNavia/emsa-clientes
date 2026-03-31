@@ -342,20 +342,27 @@ function rHistCli(nombre){
   TRAMOS.forEach(t=>tramoDat[t]=0);
   docs.forEach(r=>tramoDat[r['Clasifica vcto']]=(tramoDat[r['Clasifica vcto']]||0)+num(r.SALDO));
 
-  // Agrupar por MES-AÑO — incluir todos los meses del dataset (con ceros)
-  const allMeses = [...new Set(D.map(r=>r['MES-AÑO']).filter(m=>m&&m!=='nan'))].sort();
+  // Generar últimos 12 meses desde hoy (con ceros donde no haya datos)
+  const hoy = new Date();
+  const ultimos12 = [];
+  for(let i=11;i>=0;i--){
+    const d = new Date(hoy.getFullYear(), hoy.getMonth()-i, 1);
+    const yyyymm = String(d.getFullYear()) + String(d.getMonth()+1).padStart(2,'0');
+    ultimos12.push(yyyymm);
+  }
   const byMes = {};
-  allMeses.forEach(m=>byMes[m]={venc:0,pv:0});
+  ultimos12.forEach(m=>byMes[m]={venc:0,pv:0});
   docs.forEach(r=>{
-    const k = r['MES-AÑO']||'';
-    if(!k||k==='nan') return;
+    const k = (r['MES-AÑO']||'').replace('.0','').trim();
+    if(!k||k==='nan'||!byMes[k]) return;
     if(r.ESTADO==='VENCIDO') byMes[k].venc+=num(r.SALDO);
     else byMes[k].pv+=num(r.SALDO);
   });
-  const meses = allMeses;
+  const meses = ultimos12;
   const mesLabels = meses.map(m=>{
     const mm={'01':'Ene','02':'Feb','03':'Mar','04':'Abr','05':'May','06':'Jun',
               '07':'Jul','08':'Ago','09':'Sep','10':'Oct','11':'Nov','12':'Dic'};
+    // formato YYYYMM
     return (mm[m.slice(4,6)]||m.slice(4,6))+"'"+m.slice(2,4);
   });
 
