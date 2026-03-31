@@ -98,6 +98,7 @@ td.heat-1{background:rgba(201,74,74,.12)}td.heat-2{background:rgba(201,74,74,.25
 
 <main id="mc"></main>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 
 // ── AUTENTICACIÓN ─────────────────────────────────────────────
@@ -143,7 +144,7 @@ async function loadMeta() {
 const TRAMOS=['120+','90-120','60-90','30-60','7-30','0-7','POR VENCER'];
 const TL={'POR VENCER':'Por Vencer','0-7':'0–7d','7-30':'7–30d','30-60':'30–60d','60-90':'60–90d','90-120':'90–120d','120+':'120+ d'};
 
-let tab='buscar', fest='todos', exCli=new Set(), exCat=new Set(), heat=true, hMax={};
+let tab='buscar', fest='todos', exCli=new Set(), exCat=new Set(), heat=true, hMax={}, histChart=null;
 
 const num=v=>{const n=parseFloat(String(v).replace(/[^0-9.-]/g,''));return isNaN(n)?0:n;};
 const fmtM=v=>'$'+(v/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1})+'M';
@@ -328,26 +329,115 @@ function onHI(v){
 function rHistCli(nombre){
   document.getElementById('inp-hist').value=nombre;
   document.getElementById('hist-ac').style.display='none';
-  const docs=D.filter(r=>r['NOMBRE /RAZON SOCIAL']===nombre).sort((a,b)=>num(b['DIAS VENCIDOS'])-num(a['DIAS VENCIDOS']));
+
+  const docs = D.filter(r=>r['NOMBRE /RAZON SOCIAL']===nombre);
   if(!docs.length){document.getElementById('hist-area').innerHTML='<div class="state-box"><span>Sin documentos.</span></div>';return;}
-  const tot=docs.reduce((s,r)=>s+num(r.SALDO),0);
-  const venc=docs.filter(r=>r.ESTADO==='VENCIDO').reduce((s,r)=>s+num(r.SALDO),0);
-  const rows=docs.map(r=>{const d=num(r['DIAS VENCIDOS']),ev=r.ESTADO==='VENCIDO';
+
+  const tot  = docs.reduce((s,r)=>s+num(r.SALDO),0);
+  const venc = docs.filter(r=>r.ESTADO==='VENCIDO').reduce((s,r)=>s+num(r.SALDO),0);
+  const pv   = docs.filter(r=>r.ESTADO==='POR VENCER').reduce((s,r)=>s+num(r.SALDO),0);
+
+  // Agrupar por tramo de aging para gráfico
+  const tramoDat = {};
+  TRAMOS.forEach(t=>tramoDat[t]=0);
+  docs.forEach(r=>tramoDat[r['Clasifica vcto']]=(tramoDat[r['Clasifica vcto']]||0)+num(r.SALDO));
+
+  // Agrupar por MES-AÑO para evolución temporal
+  const byMes = {};
+  docs.forEach(r=>{
+    const k = r['MES-AÑO']||'';
+    if(!k||k==='nan') return;
+    if(!byMes[k]) byMes[k]={venc:0,pv:0};
+    if(r.ESTADO==='VENCIDO') byMes[k].venc+=num(r.SALDO);
+    else byMes[k].pv+=num(r.SALDO);
+  });
+  const meses = Object.keys(byMes).sort();
+  const mesLabels = meses.map(m=>{
+    const mm={'01':'Ene','02':'Feb','03':'Mar','04':'Abr','05':'May','06':'Jun',
+              '07':'Jul','08':'Ago','09':'Sep','10':'Oct','11':'Nov','12':'Dic'};
+    return (mm[m.slice(4,6)]||m.slice(4,6))+"'"+m.slice(2,4);
+  });
+
+  // Tabla documentos
+  const docsSort = [...docs].sort((a,b)=>num(b['DIAS VENCIDOS'])-num(a['DIAS VENCIDOS']));
+  const rows = docsSort.map(r=>{
+    const d=num(r['DIAS VENCIDOS']),ev=r.ESTADO==='VENCIDO';
     return `<tr><td>${r['NOMBRE COD.DOC.']} #${r['#DOC.']}</td><td>${r['EMISIÓN']}</td><td>${r['VENCIM.']}</td><td>${r.SEDE}</td><td class="${ev?'red':''}">${fmtCL(num(r.SALDO))}</td><td><span class="${ev?'badge-venc':'badge-ok'}">${ev?d+'d':'Por vencer'}</span></td></tr>`;
   }).join('');
+
+  // Tramos HTML
+  const tramosH = TRAMOS.map(t=>tramoDat[t]>0
+    ?`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr);font-size:12px">
+        <span style="color:${t==='POR VENCER'?'var(--grn)':'var(--red)'}">${TL[t]}</span>
+        <span style="font-family:var(--mono)">${fmtCL(tramoDat[t])}</span>
+      </div>`:''
+  ).join('');
+
   document.getElementById('hist-area').innerHTML=`
     <div class="ficha" style="margin-top:0">
-      <div class="ficha-head"><div><div class="ficha-nombre">${nombre}</div><div class="ficha-rut">${docs[0]['RUT COMPLETO']} · ${docs[0].CLI_HOLDING}</div></div></div>
+      <div class="ficha-head">
+        <div><div class="ficha-nombre">${nombre}</div><div class="ficha-rut">${docs[0]['RUT COMPLETO']} · ${docs[0].CLI_HOLDING} · ${docs[0].SEDE}</div></div>
+        <span class="${venc>0?'badge-venc':'badge-ok'}">${venc>0?'Con deuda vencida':'Al día'}</span>
+      </div>
       <div class="ficha-stats">
         <div class="stat"><div class="stat-l">Total deuda</div><div class="stat-v">${fmtM(tot)}</div></div>
         <div class="stat"><div class="stat-l">Vencido</div><div class="stat-v red">${fmtM(venc)}</div></div>
-        <div class="stat"><div class="stat-l">Documentos</div><div class="stat-v">${docs.length}</div></div>
+        <div class="stat"><div class="stat-l">Por vencer</div><div class="stat-v grn">${fmtM(pv)}</div></div>
       </div>
+      <div style="margin-bottom:14px">${tramosH}</div>
     </div>
-    <div class="card" style="margin-top:14px">
+    ${meses.length>1?`
+    <div class="card">
+      <div class="ch">
+        <div><div class="ct">Evolución de deuda por mes de emisión</div>
+        <div class="cs">Vencido vs Por vencer · saldo acumulado</div></div>
+        <div class="leg">
+          <span class="li"><span class="ll" style="background:var(--red)"></span>Vencido</span>
+          <span class="li"><span class="ll" style="background:var(--grn)"></span>Por vencer</span>
+        </div>
+      </div>
+      <div class="cw" style="height:220px"><canvas id="histChartCxC"></canvas></div>
+    </div>`:''}
+    <div class="card" style="margin-top:0">
       <div class="card-head"><div class="card-title">Detalle de documentos · ${docs.length} registros</div></div>
       <div style="overflow-x:auto"><table><thead><tr><th>Documento</th><th>Emisión</th><th>Vencimiento</th><th>Sede</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table></div>
     </div>`;
+
+  // Renderizar chart
+  if(histChart){histChart.destroy();histChart=null;}
+  if(meses.length>1){
+    setTimeout(()=>{
+      const ctx = document.getElementById('histChartCxC');
+      if(!ctx) return;
+      histChart = new Chart(ctx,{
+        type:'bar',
+        data:{
+          labels: mesLabels,
+          datasets:[
+            {label:'Vencido', data:meses.map(m=>Math.round(byMes[m].venc/1e6*10)/10),
+             backgroundColor:'rgba(201,74,74,.7)', borderRadius:4, barPercentage:.6, categoryPercentage:.7},
+            {label:'Por vencer', data:meses.map(m=>Math.round(byMes[m].pv/1e6*10)/10),
+             backgroundColor:'rgba(29,158,117,.7)', borderRadius:4, barPercentage:.6, categoryPercentage:.7}
+          ]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          interaction:{mode:'index',intersect:false},
+          plugins:{
+            legend:{display:false},
+            tooltip:{backgroundColor:'#1a1d27',borderColor:'rgba(255,255,255,.1)',borderWidth:1,
+              titleColor:'#e8eaf0',bodyColor:'#7a7f94',padding:10,
+              callbacks:{label:ctx=>' '+ctx.dataset.label+': M$'+ctx.parsed.y.toLocaleString('es-CL')}}
+          },
+          scales:{
+            x:{grid:{display:false},ticks:{color:'#7a7f94',font:{size:11}},border:{color:'rgba(255,255,255,.07)'},stacked:true},
+            y:{grid:{color:'rgba(255,255,255,.05)'},border:{display:false},stacked:true,
+               ticks:{color:'#7a7f94',font:{size:11},callback:v=>'M$'+v.toLocaleString('es-CL')}}
+          }
+        }
+      });
+    },80);
+  }
 }
 
 // ── INIT ──────────────────────────────────────────────────────
