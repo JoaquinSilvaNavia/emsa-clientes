@@ -342,16 +342,17 @@ function rHistCli(nombre){
   TRAMOS.forEach(t=>tramoDat[t]=0);
   docs.forEach(r=>tramoDat[r['Clasifica vcto']]=(tramoDat[r['Clasifica vcto']]||0)+num(r.SALDO));
 
-  // Agrupar por MES-AÑO para evolución temporal
+  // Agrupar por MES-AÑO — incluir todos los meses del dataset (con ceros)
+  const allMeses = [...new Set(D.map(r=>r['MES-AÑO']).filter(m=>m&&m!=='nan'))].sort();
   const byMes = {};
+  allMeses.forEach(m=>byMes[m]={venc:0,pv:0});
   docs.forEach(r=>{
     const k = r['MES-AÑO']||'';
     if(!k||k==='nan') return;
-    if(!byMes[k]) byMes[k]={venc:0,pv:0};
     if(r.ESTADO==='VENCIDO') byMes[k].venc+=num(r.SALDO);
     else byMes[k].pv+=num(r.SALDO);
   });
-  const meses = Object.keys(byMes).sort();
+  const meses = allMeses;
   const mesLabels = meses.map(m=>{
     const mm={'01':'Ene','02':'Feb','03':'Mar','04':'Abr','05':'May','06':'Jun',
               '07':'Jul','08':'Ago','09':'Sep','10':'Oct','11':'Nov','12':'Dic'};
@@ -386,18 +387,17 @@ function rHistCli(nombre){
       </div>
       <div style="margin-bottom:14px">${tramosH}</div>
     </div>
-    ${meses.length>1?`
     <div class="card">
       <div class="ch">
         <div><div class="ct">Evolución de deuda por mes de emisión</div>
-        <div class="cs">Vencido vs Por vencer · saldo acumulado</div></div>
+        <div class="cs">Vencido vs Por vencer · todos los meses</div></div>
         <div class="leg">
           <span class="li"><span class="ll" style="background:var(--red)"></span>Vencido</span>
           <span class="li"><span class="ll" style="background:var(--grn)"></span>Por vencer</span>
         </div>
       </div>
       <div class="cw" style="height:220px"><canvas id="histChartCxC"></canvas></div>
-    </div>`:''}
+    </div>
     <div class="card" style="margin-top:0">
       <div class="card-head"><div class="card-title">Detalle de documentos · ${docs.length} registros</div></div>
       <div style="overflow-x:auto"><table><thead><tr><th>Documento</th><th>Emisión</th><th>Vencimiento</th><th>Sede</th><th>Saldo</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -405,8 +405,7 @@ function rHistCli(nombre){
 
   // Renderizar chart
   if(histChart){histChart.destroy();histChart=null;}
-  if(meses.length>1){
-    setTimeout(()=>{
+  setTimeout(()=>{
       const ctx = document.getElementById('histChartCxC');
       if(!ctx) return;
       histChart = new Chart(ctx,{
@@ -436,8 +435,7 @@ function rHistCli(nombre){
           }
         }
       });
-    },80);
-  }
+  },80);
 }
 
 // ── INIT ──────────────────────────────────────────────────────
