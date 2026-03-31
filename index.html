@@ -99,6 +99,20 @@ td.heat-1{background:rgba(201,74,74,.12)}td.heat-2{background:rgba(201,74,74,.25
 <main id="mc"></main>
 
 <script>
+
+// ── AUTENTICACIÓN ─────────────────────────────────────────────
+(function(){
+  var KEY = 'emsa_auth', PWD = 'LuisSilvaEMSA';
+  if(localStorage.getItem(KEY) === PWD) return;
+  var ok = false;
+  while(!ok){
+    var input = prompt('EMSA — Ingresa la clave de acceso:');
+    if(input === null) { document.body.innerHTML=''; return; }
+    if(input === PWD) { localStorage.setItem(KEY, PWD); ok = true; }
+    else alert('Clave incorrecta. Intenta nuevamente.');
+  }
+})();
+
 // ── CONFIGURACIÓN SHEETS ─────────────────────────────────────
 const SHEET_ID = "1TQRW0KhYG9LSyoQAo2asseT8tUvm6CHUEoRquULJkzI";
 const API_KEY  = "AIzaSyCXaM0fXC-6H-Pz22uRTv52uMe3xtIoLkU";
