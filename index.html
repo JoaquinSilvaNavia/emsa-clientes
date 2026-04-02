@@ -303,6 +303,21 @@ function rResumen(){
     </div>`;
 }
 
+function top20(data){
+  const m={};
+  data.forEach(r=>{const k=r['NOMBRE /RAZON SOCIAL'];if(!m[k])m[k]={rut:r['RUT COMPLETO'],cat:r.CLI_HOLDING,tot:0,v:0,md:0};const s=num(r.SALDO);m[k].tot+=s;if(r.ESTADO==='VENCIDO'){m[k].v+=s;m[k].md=Math.max(m[k].md,num(r['DIAS VENCIDOS']));} });
+  const sorted=Object.entries(m).sort((a,b)=>b[1].tot-a[1].tot).slice(0,20);
+  const rows=sorted.map(([n,d])=>`<tr class="clickable" onclick="goTo('${n.replace(/'/g,"\\'")}')">
+    <td>${n}</td>
+    <td style="color:var(--muted);font-size:11px">${d.rut}</td>
+    <td>${d.cat}</td>
+    <td>${fmtM(d.tot)}</td>
+    <td class="red">${fmtM(d.v)}</td>
+    <td style="color:${d.md>90?'var(--red)':d.md>30?'var(--amb)':'var(--grn)'}">${d.md>0?d.md+'d':'—'}</td>
+  </tr>`).join('');
+  return `<table><thead><tr><th>Cliente</th><th>RUT</th><th>Categoría</th><th>Total</th><th>Vencido</th><th>Máx días</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 function toggleAnio(a){
   if(selAnios.has(a)) selAnios.delete(a); else selAnios.add(a);
   rResumen();
