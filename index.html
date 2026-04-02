@@ -66,6 +66,7 @@ td.heat-1{background:rgba(201,74,74,.12)}td.heat-2{background:rgba(201,74,74,.25
 .doc-tipo{font-size:11px;color:var(--muted)}
 .doc-right{text-align:right}.doc-monto{font-family:var(--mono);font-size:13px;font-weight:500}
 .doc-dias{font-size:11px;margin-top:2px}
+tbody tr.sel td{background:rgba(29,158,117,.08)!important}
 .drill{border-left:3px solid var(--grn);background:var(--bg3);border-radius:0 8px 8px 0;padding:12px 16px;margin-top:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .state-box{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:12px;color:var(--muted);font-size:13px}
@@ -255,7 +256,7 @@ function rResumen(){
 
   const rows=rowsData.map(({c,totC})=>{
     const celdas=TRAMOS.map(t=>{const v=pv2[c][t]||0;return `<td class="${hc(t,v)}" onclick="drillCatR('${c}','${t}')" style="cursor:pointer">${v>0?fmtM(v):'—'}</td>`;}).join('');
-    return `<tr class="clickable" onclick="addExcCat('${c}')"><td title="Clic para excluir">${c}</td>${celdas}<td style="font-weight:600">${fmtM(totC)}</td></tr>`;
+    return `<tr class="clickable" id="cxc-row-${c.replace(/[^a-zA-Z0-9]/g,'_')}" onclick="drillCatCxC('${c}')" style="cursor:pointer"><td>${c}</td>${celdas}<td style="font-weight:600">${fmtM(totC)}</td></tr>`;
   }).join('');
 
   const tagCli=[...exCli].map(c=>`<span class="tag tag-red" onclick="rmExc('cli','${c.replace(/'/g,"\\'")}')">✕ ${c}</span>`).join('');
@@ -290,10 +291,11 @@ function rResumen(){
     </div>
     <div class="card">
       <div class="card-head">
-        <div><div class="card-title">Resumen por categoría de cliente</div><div class="card-sub">Clic en fila → excluir · clic en celda → ver detalle</div></div>
+        <div><div class="card-title">Resumen por categoría de cliente</div><div class="card-sub">Clic en fila → ver clientes · clic en celda → ver tramo · Excluir: usa inputs abajo</div></div>
       </div>
       <div style="overflow-x:auto"><table><thead><tr><th>Categoría</th>${thT}<th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
     </div>
+    <div id="drill-cxc" style="display:none"></div>
     <div id="drill-area"></div>
     <div class="card">
       <div class="card-head"><div class="card-title">Top 20 clientes</div></div>
@@ -306,45 +308,69 @@ function toggleAnio(a){
   rResumen();
 }
 
+// ── DRILL CAT (fila completa) ────────────────────────────────
+let _dAC='';
+function drillCatCxC(cat){
+  if(_dAC===cat){_dAC='';document.getElementById('drill-cxc').style.display='none';document.querySelectorAll('#mc tr.clickable').forEach(r=>r.classList.remove('sel'));return;}
+  _dAC=cat;
+  document.querySelectorAll('#mc tr.clickable').forEach(r=>r.classList.remove('sel'));
+  const rowEl=document.getElementById('cxc-row-'+cat.replace(/[^a-zA-Z0-9]/g,'_'));
+  if(rowEl) rowEl.classList.add('sel');
+  const clientes={};
+  fd().filter(r=>r.CLI_HOLDING===cat).forEach(r=>{
+    const k=r['NOMBRE /RAZON SOCIAL'];
+    if(!clientes[k]) clientes[k]={rut:r['RUT COMPLETO'],venc:0,pv:0};
+    if(r.ESTADO==='VENCIDO') clientes[k].venc+=num(r.SALDO);
+    else clientes[k].pv+=num(r.SALDO);
+  });
+  const lista=Object.entries(clientes).map(([n,d])=>({n,rut:d.rut,venc:d.venc,pv:d.pv,tot:d.venc+d.pv})).filter(c=>c.tot>0).sort((a,b)=>b.tot-a.tot);
+  const totV=lista.reduce((s,c)=>s+c.venc,0);
+  const totP=lista.reduce((s,c)=>s+c.pv,0);
+  const rows=lista.map(c=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--bdr);cursor:pointer" onclick="goTo('${c.n.replace(/'/g,"\\'")}')">
+      <div><div style="font-size:13px;font-weight:500">${c.n}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${c.rut}</div></div>
+      <div style="display:flex;gap:14px;align-items:center">
+        <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Vencido</div><div style="font-family:var(--mono);font-size:12px;color:${c.venc>0?'var(--red)':'var(--muted)'}">${c.venc>0?fmtM(c.venc):'—'}</div></div>
+        <div style="text-align:right"><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Por vencer</div><div style="font-family:var(--mono);font-size:12px;color:${c.pv>0?'var(--grn)':'var(--muted)'}">${c.pv>0?fmtM(c.pv):'—'}</div></div>
+        <div style="text-align:right;min-width:70px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase">Total</div><div style="font-family:var(--mono);font-size:12px;font-weight:600">${fmtM(c.tot)}</div></div>
+        <span style="font-size:13px;color:var(--grn)">→</span>
+      </div>
+    </div>`).join('');
+  document.getElementById('drill-cxc').innerHTML=`
+    <div class="drill" style="border-left-color:var(--grn)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div><div style="font-size:13px;font-weight:600">${cat}</div><div style="font-size:11px;color:var(--muted)">${lista.length} clientes</div></div>
+        <button onclick="_dAC='';document.getElementById('drill-cxc').style.display='none';document.querySelectorAll('#mc tr.clickable').forEach(r=>r.classList.remove('sel'))"
+          style="padding:4px 12px;border:1px solid var(--bdr2);border-radius:6px;background:none;color:var(--muted);cursor:pointer;font-size:12px">✕ Cerrar</button>
+      </div>
+      ${rows}
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--bdr)">
+        <div class="stat"><div class="stat-l">Vencido</div><div class="stat-v red">${fmtM(totV)}</div></div>
+        <div class="stat"><div class="stat-l">Por vencer</div><div class="stat-v grn">${fmtM(totP)}</div></div>
+        <div class="stat"><div class="stat-l">Total</div><div class="stat-v">${fmtM(totV+totP)}</div></div>
+      </div>
+    </div>`;
+  document.getElementById('drill-cxc').style.display='block';
+  setTimeout(()=>document.getElementById('drill-cxc').scrollIntoView({behavior:'smooth',block:'nearest'}),80);
+}
+
+// ── DRILL TRAMO (celda específica) ───────────────────────────
 function drillCatR(cat,tramo){
   const data=fd().filter(r=>r.CLI_HOLDING===cat&&r['Clasifica vcto']===tramo);
   if(!data.length) return;
   const m={};
   data.forEach(r=>{const k=r['NOMBRE /RAZON SOCIAL'];if(!m[k])m[k]={rut:r['RUT COMPLETO'],tot:0};m[k].tot+=num(r.SALDO);});
   const sorted=Object.entries(m).sort((a,b)=>b[1].tot-a[1].tot);
-  const rows=sorted.map(([n,d])=>
-    `<tr class="clickable" onclick="goTo('${n.replace(/'/g,"\\'")}')">
-      <td>${n}</td><td style="color:var(--muted);font-size:11px">${d.rut}</td>
-      <td>${fmtM(d.tot)}</td>
-      <td><span style="font-size:11px;color:var(--grn);cursor:pointer" onclick="goTo('${n.replace(/'/g,"\\'")}')">→ Ver ficha</span></td>
-    </tr>`).join('');
+  const rows=sorted.map(([n,d])=>`<tr class="clickable" onclick="goTo('${n.replace(/'/g,"\\'")}')"><td>${n}</td><td style="color:var(--muted);font-size:11px">${d.rut}</td><td>${fmtM(d.tot)}</td><td><span style="font-size:11px;color:var(--grn)">-> Ver ficha</span></td></tr>`).join('');
   document.getElementById('drill-area').innerHTML=`
     <div class="drill">
       <div style="font-size:12px;font-weight:500;margin-bottom:10px;display:flex;justify-content:space-between">
-        <span>${cat} · ${TL[tramo]} — ${sorted.length} clientes</span>
-        <span style="font-size:11px;color:var(--muted);cursor:pointer" onclick="document.getElementById('drill-area').innerHTML=''">✕ Cerrar</span>
+        <span>${cat} - ${TL[tramo]} - ${sorted.length} clientes</span>
+        <span style="font-size:11px;color:var(--muted);cursor:pointer" onclick="document.getElementById('drill-area').innerHTML=''">X Cerrar</span>
       </div>
       <table><thead><tr><th>Cliente</th><th>RUT</th><th>Saldo</th><th></th></tr></thead><tbody>${rows}</tbody></table>
     </div>`;
 }
-
-
-function top20(data){
-  const m={};
-  data.forEach(r=>{const k=r['NOMBRE /RAZON SOCIAL'];if(!m[k])m[k]={rut:r['RUT COMPLETO'],cat:r.CLI_HOLDING,tot:0,v:0,md:0};const s=num(r.SALDO);m[k].tot+=s;if(r.ESTADO==='VENCIDO'){m[k].v+=s;m[k].md=Math.max(m[k].md,num(r['DIAS VENCIDOS']));} });
-  const s=Object.entries(m).sort((a,b)=>b[1].tot-a[1].tot).slice(0,20);
-  return `<table><thead><tr><th>Cliente</th><th>RUT</th><th>Categoría</th><th>Total</th><th>Vencido</th><th>Máx días</th></tr></thead><tbody>${
-    s.map(([n,d])=>`<tr class="clickable" onclick="goTo('${n.replace(/'/g,"\\'")}')"><td>${n}</td><td style="color:var(--muted);font-size:11px">${d.rut}</td><td>${d.cat}</td><td>${fmtM(d.tot)}</td><td class="red">${fmtM(d.v)}</td><td style="color:${d.md>90?'var(--red)':d.md>30?'var(--amb)':'var(--grn)'}">${d.md>0?d.md+'d':'—'}</td></tr>`).join('')
-  }</tbody></table>`;
-}
-
-function drillC(cat,tramo){
-  const data=fd().filter(r=>r.CLI_HOLDING===cat&&r['Clasifica vcto']===tramo);if(!data.length)return;
-  const m={};data.forEach(r=>{const k=r['NOMBRE /RAZON SOCIAL'];if(!m[k])m[k]={rut:r['RUT COMPLETO'],tot:0};m[k].tot+=num(r.SALDO);});
-  const rows=Object.entries(m).sort((a,b)=>b[1].tot-a[1].tot).map(([n,d])=>`<tr class="clickable" onclick="goTo('${n.replace(/'/g,"\\'")}')"><td>${n}</td><td style="color:var(--muted);font-size:11px">${d.rut}</td><td>${fmtM(d.tot)}</td></tr>`).join('');
-  document.getElementById('drill-area').innerHTML=`<div class="drill"><div style="font-size:12px;font-weight:500;margin-bottom:10px">${cat} · ${TL[tramo]}</div><table><thead><tr><th>Cliente</th><th>RUT</th><th>Saldo</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-}
-
 function setFR(f){fest=f;rResumen();}
 function addExcCat(c){exCat.add(c);rResumen();}
 function addExcCli(v,el){const m=D.find(r=>r['NOMBRE /RAZON SOCIAL'].toLowerCase().includes(v.toLowerCase()));if(m)exCli.add(m['NOMBRE /RAZON SOCIAL']);el.value='';rResumen();}
