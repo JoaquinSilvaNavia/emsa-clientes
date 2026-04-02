@@ -145,6 +145,7 @@ const TRAMOS=['120+','90-120','60-90','30-60','7-30','0-7','POR VENCER'];
 const TL={'POR VENCER':'Por Vencer','0-7':'0–7d','7-30':'7–30d','30-60':'30–60d','60-90':'60–90d','90-120':'90–120d','120+':'120+ d'};
 
 let tab='buscar', fest='todos', exCli=new Set(), exCat=new Set(), heat=true, hMax={}, histChart=null;
+let selAnios=new Set(); // filtro años emisión
 
 const num=v=>{const n=parseFloat(String(v).replace(/[^0-9.-]/g,''));return isNaN(n)?0:n;};
 const fmtM=v=>'$'+(v/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1})+'M';
@@ -156,6 +157,10 @@ function fd(){
     if(fest==='porvencer' && r.ESTADO!=='POR VENCER') return false;
     if(exCli.size && exCli.has(r['NOMBRE /RAZON SOCIAL'])) return false;
     if(exCat.size && exCat.has(r.CLI_HOLDING)) return false;
+    if(selAnios.size){
+      const anio=r['MES-AÑO']?String(r['MES-AÑO']).slice(0,4):'';
+      if(!selAnios.has(anio)) return false;
+    }
     return true;
   });
 }
@@ -225,6 +230,8 @@ function rFicha(nombre){
 
 // ── RESUMEN ───────────────────────────────────────────────────
 function rResumen(){
+  // Años disponibles para filtro
+  const todosAnios=[...new Set(D.map(r=>String(r['MES-AÑO']).slice(0,4)).filter(a=>a&&a!=='unde'))].sort().reverse();
   const data=fd();
   const tot=data.reduce((s,r)=>s+num(r.SALDO),0);
   const venc=data.filter(r=>r.ESTADO==='VENCIDO').reduce((s,r)=>s+num(r.SALDO),0);
@@ -242,15 +249,20 @@ function rResumen(){
   const thT=TRAMOS.map(t=>`<th>${TL[t]}</th>`).join('');
   const rowsData=cats.map(c=>{
     const totC=TRAMOS.reduce((s,t)=>s+(pv2[c][t]||0),0);
-    return {c, totC};
+    return {c,totC};
   }).filter(x=>x.totC>0).sort((a,b)=>b.totC-a.totC);
+
   const rows=rowsData.map(({c,totC})=>{
-    const celdas=TRAMOS.map(t=>{const v=pv2[c][t]||0;return `<td class="${hc(t,v)}" onclick="drillC('${c}','${t}')" style="cursor:pointer">${v>0?fmtM(v):'—'}</td>`;}).join('');
+    const celdas=TRAMOS.map(t=>{const v=pv2[c][t]||0;return `<td class="${hc(t,v)}" onclick="drillCatR('${c}','${t}')" style="cursor:pointer">${v>0?fmtM(v):'—'}</td>`;}).join('');
     return `<tr class="clickable" onclick="addExcCat('${c}')"><td title="Clic para excluir">${c}</td>${celdas}<td style="font-weight:600">${fmtM(totC)}</td></tr>`;
   }).join('');
 
   const tagCli=[...exCli].map(c=>`<span class="tag tag-red" onclick="rmExc('cli','${c.replace(/'/g,"\\'")}')">✕ ${c}</span>`).join('');
   const tagCat=[...exCat].map(c=>`<span class="tag tag-amb" onclick="rmExc('cat','${c.replace(/'/g,"\\'")}')">✕ ${c}</span>`).join('');
+
+  const anioBtns=todosAnios.map(a=>`<button class="cat-btn${selAnios.has(a)?' on':''}"
+    style="font-size:11px;padding:3px 10px;${selAnios.has(a)?'color:var(--grn);border-color:var(--grn);border-width:2px':''}"
+    onclick="toggleAnio('${a}')">${a}</button>`).join('');
 
   document.getElementById('mc').innerHTML=`
     <div class="kpis" style="margin-top:18px">
@@ -258,6 +270,11 @@ function rResumen(){
       <div class="kpi"><div class="kpi-l">Vencido</div><div class="kpi-v red">${fmtM(venc)}</div><div class="kpi-s">${(venc/tot*100).toFixed(1)}% del total</div></div>
       <div class="kpi"><div class="kpi-l">Por vencer</div><div class="kpi-v grn">${fmtM(pv)}</div><div class="kpi-s">${(pv/tot*100).toFixed(1)}% del total</div></div>
       <div class="kpi"><div class="kpi-l">120+ días</div><div class="kpi-v amb">${fmtM(crit)}</div><div class="kpi-s">deuda crítica</div></div>
+    </div>
+    <div class="filter-row" style="margin-bottom:8px">
+      <span style="font-size:11px;color:var(--muted);margin-right:4px">Año emisión:</span>
+      ${anioBtns}
+      ${selAnios.size?`<span class="tag tag-amb" onclick="selAnios.clear();rResumen()" style="cursor:pointer">✕ Limpiar</span>`:''}
     </div>
     <div class="filter-row">
       <button class="filter-btn ${fest==='todos'?'on':''}"     onclick="setFR('todos',this)">Todos</button>
@@ -272,7 +289,7 @@ function rResumen(){
     </div>
     <div class="card">
       <div class="card-head">
-        <div><div class="card-title">Resumen por categoría de cliente</div><div class="card-sub">Clic en fila para excluir · clic en celda para ver detalle</div></div>
+        <div><div class="card-title">Resumen por categoría de cliente</div><div class="card-sub">Clic en fila → excluir · clic en celda → ver detalle</div></div>
       </div>
       <div style="overflow-x:auto"><table><thead><tr><th>Categoría</th>${thT}<th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
     </div>
@@ -282,6 +299,34 @@ function rResumen(){
       <div style="overflow-x:auto">${top20(data)}</div>
     </div>`;
 }
+
+function toggleAnio(a){
+  if(selAnios.has(a)) selAnios.delete(a); else selAnios.add(a);
+  rResumen();
+}
+
+function drillCatR(cat,tramo){
+  const data=fd().filter(r=>r.CLI_HOLDING===cat&&r['Clasifica vcto']===tramo);
+  if(!data.length) return;
+  const m={};
+  data.forEach(r=>{const k=r['NOMBRE /RAZON SOCIAL'];if(!m[k])m[k]={rut:r['RUT COMPLETO'],tot:0};m[k].tot+=num(r.SALDO);});
+  const sorted=Object.entries(m).sort((a,b)=>b[1].tot-a[1].tot);
+  const rows=sorted.map(([n,d])=>
+    `<tr class="clickable" onclick="goTo('${n.replace(/'/g,"\\'")}')">
+      <td>${n}</td><td style="color:var(--muted);font-size:11px">${d.rut}</td>
+      <td>${fmtM(d.tot)}</td>
+      <td><span style="font-size:11px;color:var(--grn);cursor:pointer" onclick="goTo('${n.replace(/'/g,"\\'")}')">→ Ver ficha</span></td>
+    </tr>`).join('');
+  document.getElementById('drill-area').innerHTML=`
+    <div class="drill">
+      <div style="font-size:12px;font-weight:500;margin-bottom:10px;display:flex;justify-content:space-between">
+        <span>${cat} · ${TL[tramo]} — ${sorted.length} clientes</span>
+        <span style="font-size:11px;color:var(--muted);cursor:pointer" onclick="document.getElementById('drill-area').innerHTML=''">✕ Cerrar</span>
+      </div>
+      <table><thead><tr><th>Cliente</th><th>RUT</th><th>Saldo</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+}
+
 
 function top20(data){
   const m={};
