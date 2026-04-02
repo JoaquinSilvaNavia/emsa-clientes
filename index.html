@@ -276,7 +276,7 @@ function rResumen(){
     <div class="filter-row" style="margin-bottom:8px">
       <span style="font-size:11px;color:var(--muted);margin-right:4px">Año emisión:</span>
       ${anioBtns}
-      ${selAnios.size?`<span class="tag tag-amb" onclick="selAnios.clear();rResumen()" style="cursor:pointer">✕ Limpiar</span>`:''}
+      ${selAnios.size?'<span class="tag tag-amb" onclick="selAnios.clear();rResumen()" style="cursor:pointer">&#10005; Limpiar</span>':''}
     </div>
     <div class="filter-row">
       <button class="filter-btn ${fest==='todos'?'on':''}"     onclick="setFR('todos',this)">Todos</button>
