@@ -147,7 +147,7 @@ const TRAMOS=['120+','90-120','60-90','30-60','7-30','0-7','POR VENCER'];
 const TL={'POR VENCER':'Por Vencer','0-7':'0–7d','7-30':'7–30d','30-60':'30–60d','60-90':'60–90d','90-120':'90–120d','120+':'120+ d'};
 
 let tab='buscar', fest='todos', exCli=new Set(), exCat=new Set(), heat=true, hMax={}, histChart=null;
-let selAnios=new Set(); // filtro años emisión
+let selAnios=new Set(['2025','2026']); // filtro años emisión — 2025 y 2026 preseleccionados
 
 const num=v=>{const n=parseFloat(String(v).replace(/[^0-9.-]/g,''));return isNaN(n)?0:n;};
 const fmtM=v=>'$'+(v/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1})+'M';
@@ -262,8 +262,11 @@ function rResumen(){
   const tagCli=[...exCli].map(c=>`<span class="tag tag-red" onclick="rmExc('cli','${c.replace(/'/g,"\\'")}')">✕ ${c}</span>`).join('');
   const tagCat=[...exCat].map(c=>`<span class="tag tag-amb" onclick="rmExc('cat','${c.replace(/'/g,"\\'")}')">✕ ${c}</span>`).join('');
 
-  const anioBtns=todosAnios.map(a=>`<button class="cat-btn${selAnios.has(a)?' on':''}"
-    style="font-size:11px;padding:3px 10px;${selAnios.has(a)?'color:var(--grn);border-color:var(--grn);border-width:2px':''}"
+  const anioBtns=todosAnios.map(a=>`<button
+    style="padding:4px 12px;font-size:11px;font-weight:500;cursor:pointer;border-radius:20px;
+      ${selAnios.has(a)
+        ?'background:rgba(29,158,117,.15);color:var(--grn);border:1.5px solid var(--grn)'
+        :'background:transparent;color:var(--muted);border:1px solid rgba(255,255,255,.1)'}"
     onclick="toggleAnio('${a}')">${a}</button>`).join('');
 
   document.getElementById('mc').innerHTML=`
