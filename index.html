@@ -149,7 +149,8 @@ const TL={'POR VENCER':'Por Vencer','0-7':'0–7d','7-30':'7–30d','30-60':'30�
 
 let tab='buscar', fest='todos', exCli=new Set(), exCat=new Set(), heat=true, hMax={}, histChart=null;
 let selAnios=new Set(['2025','2026']);
-let rawLV=[], lvChart=null, lvMode='linea'; // libro ventas // filtro años emisión — 2025 y 2026 preseleccionados
+let rawLV=[], rawLVC=[], lvChart=null, lvMode='linea';
+let lvCliente='', lvHolding='', lvCat=''; // filtros libro ventas // filtro años emisión — 2025 y 2026 preseleccionados
 
 const num=v=>{const n=parseFloat(String(v).replace(/[^0-9.-]/g,''));return isNaN(n)?0:n;};
 const fmtM=v=>'$'+(v/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1})+'M';
@@ -542,14 +543,16 @@ const SID_V = "1NppGV5go7xHYgEPUOERpljT9bvKdgaRkDbKyM41YaHY";
 const LV_COLORS = {'Gaseosas':'#3b8fd4','Jugos':'#e8534a','Bidones':'#d4890f','Agua Purificada':'#38c4c4','Aguas Saborizadas':'#9b6dd4','Isotónica':'#1d9e75'};
 
 async function ensureLV(){
-  if(rawLV.length) return;
-  const url=`https://sheets.googleapis.com/v4/spreadsheets/${SID_V}/values/ventas!A:D?key=${API_KEY}`;
-  const r=await fetch(url);
-  if(!r.ok) throw new Error('HTTP '+r.status);
-  const d=await r.json(), rows=d.values||[];
-  if(rows.length<2) return;
-  const h=rows[0];
-  rawLV=rows.slice(1).map(row=>{const o={};h.forEach((k,i)=>o[k]=row[i]??'');return o;});
+  const fetchTab = async tab => {
+    const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SID_V}/values/${tab}!A:G?key=${API_KEY}`);
+    if(!r.ok) throw new Error('HTTP '+r.status+' — '+tab);
+    const d=await r.json(), rows=d.values||[];
+    if(rows.length<2) return [];
+    const h=rows[0];
+    return rows.slice(1).map(row=>{const o={};h.forEach((k,i)=>o[k]=row[i]??'');return o;});
+  };
+  if(!rawLV.length)  rawLV  = await fetchTab('ventas');
+  if(!rawLVC.length) rawLVC = await fetchTab('ventas_cli').catch(()=>[]);
 }
 
 function rLibroV(){
@@ -557,76 +560,135 @@ function rLibroV(){
   mc.innerHTML='<div class="state-box"><div style="width:26px;height:26px;border:2px solid rgba(255,255,255,.13);border-top-color:var(--grn);border-radius:50%;animation:spin .8s linear infinite"></div><span>Cargando ventas...</span></div>';
 
   ensureLV().then(()=>{
-    if(!rawLV.length){
-      mc.innerHTML='<div class="state-box"><span>Sin datos de ventas disponibles.</span></div>';
-      return;
+    if(!rawLV.length){ mc.innerHTML='<div class="state-box"><span>Sin datos de ventas.</span></div>'; return; }
+
+    const MM={'01':'Ene','02':'Feb','03':'Mar','04':'Abr','05':'May','06':'Jun','07':'Jul','08':'Ago','09':'Sep','10':'Oct','11':'Nov','12':'Dic'};
+    const lblP=p=>(MM[p.slice(5,7)]||p.slice(5,7))+"'"+p.slice(2,4);
+
+    // ── FILTROS ──────────────────────────────────────────────
+    const hasCliData = rawLVC.length > 0;
+
+    // Holdings disponibles
+    const holdings = hasCliData ? [...new Set(rawLVC.map(r=>r.HOLDING).filter(Boolean))].sort() : [];
+    // Clientes disponibles según holding seleccionado
+    const clientesFilt = hasCliData
+      ? [...new Set(rawLVC.filter(r=>!lvHolding||r.HOLDING===lvHolding).map(r=>r.CLIENTE))].sort()
+      : [];
+    // Categorías disponibles
+    const cats = Object.keys(LV_COLORS).filter(c=>rawLV.some(r=>r.CATEGORIA===c));
+
+    // ── DATOS FILTRADOS ───────────────────────────────────────
+    // Si hay filtro de cliente → usar rawLVC; si no → usar rawLV agregado
+    let dataFuente, periodos;
+    if(hasCliData && (lvCliente||lvHolding)){
+      dataFuente = rawLVC.filter(r=>
+        (!lvHolding  || r.HOLDING===lvHolding) &&
+        (!lvCliente  || r.CLIENTE===lvCliente) &&
+        (!lvCat      || r.CATEGORIA===lvCat)
+      );
+      periodos = [...new Set(dataFuente.map(r=>r.PERIODO))].sort();
+    } else {
+      dataFuente = rawLV.filter(r=>!lvCat||r.CATEGORIA===lvCat);
+      periodos = [...new Set(rawLV.map(r=>r.PERIODO))].sort();
     }
 
-    const periodos=[...new Set(rawLV.map(r=>r.PERIODO))].sort();
-    const cats=Object.keys(LV_COLORS).filter(c=>rawLV.some(r=>r.CATEGORIA===c));
-
-    // Agrupar por periodo
+    // Totales por período
     const pvT={};
-    rawLV.forEach(r=>pvT[r.PERIODO]=(pvT[r.PERIODO]||0)+num(r.MONTO_VENTA||0));
+    dataFuente.forEach(r=>pvT[r.PERIODO]=(pvT[r.PERIODO]||0)+num(r.MONTO_VENTA||0));
 
-    // Agrupar por periodo y categoría
+    // Por período y categoría
     const pvC={};
-    rawLV.forEach(r=>{
-      if(!pvC[r.PERIODO]) pvC[r.PERIODO]={};
+    dataFuente.forEach(r=>{
+      if(!pvC[r.PERIODO])pvC[r.PERIODO]={};
       pvC[r.PERIODO][r.CATEGORIA]=(pvC[r.PERIODO][r.CATEGORIA]||0)+num(r.MONTO_VENTA||0);
     });
 
     // KPIs
     const totAll=Object.values(pvT).reduce((s,v)=>s+v,0);
-    const ultP=periodos.filter(p=>pvT[p]>0).slice(-1)[0]||'';
-    const ultV=pvT[ultP]||0;
-    const mesesConDatos=periodos.filter(p=>pvT[p]>0).length||1;
-    const prom=Math.round(totAll/mesesConDatos);
-    const topCat=cats.sort((a,b)=>rawLV.filter(r=>r.CATEGORIA===b).reduce((s,r)=>s+num(r.MONTO_VENTA),0)-rawLV.filter(r=>r.CATEGORIA===a).reduce((s,r)=>s+num(r.MONTO_VENTA),0))[0]||'';
+    const mesesCD=periodos.filter(p=>pvT[p]>0).length||1;
+    const prom=Math.round(totAll/mesesCD);
+    const catTots=cats.map(c=>({c,v:dataFuente.filter(r=>r.CATEGORIA===c).reduce((s,r)=>s+num(r.MONTO_VENTA),0)}));
+    const topCat=(catTots.sort((a,b)=>b.v-a.v)[0]?.c)||'';
 
-    // Labels de período
-    const MM={'01':'Ene','02':'Feb','03':'Mar','04':'Abr','05':'May','06':'Jun','07':'Jul','08':'Ago','09':'Sep','10':'Oct','11':'Nov','12':'Dic'};
-    const lblP=p=>{const mm=MM[p.slice(5,7)]||p.slice(5,7);return mm+"'"+p.slice(2,4);};
-
-    // Tabla resumen por categoría
-    const catRows=cats.map(c=>{
-      const tot=rawLV.filter(r=>r.CATEGORIA===c).reduce((s,r)=>s+num(r.MONTO_VENTA),0);
-      const pct=totAll>0?(tot/totAll*100).toFixed(1):0;
-      return `<tr>
-        <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${LV_COLORS[c]||'#7a7f94'};margin-right:6px"></span>${c}</td>
-        <td>${fmtM(tot)}</td>
-        <td style="color:var(--muted)">${pct}%</td>
-      </tr>`;
+    // Tabla categorías
+    const catRows=catTots.map(({c,v})=>{
+      const pct=totAll>0?(v/totAll*100).toFixed(1):0;
+      return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${LV_COLORS[c]||'#7a7f94'};margin-right:6px"></span>${c}</td><td>${fmtM(v)}</td><td style="color:var(--muted)">${pct}%</td></tr>`;
     }).join('');
+
+    // Botones holding
+    const holdingBtns = holdings.map(h=>
+      `<button class="filter-btn${h===lvHolding?' on':''}" style="font-size:11px;padding:3px 12px;${h===lvHolding?'background:var(--grn);border-color:var(--grn);color:#fff':''}"
+        onclick="lvHolding='${h.replace(/'/g,"\'")}';lvCliente='';rLibroV()">${h}</button>`
+    ).join('');
+
+    // Autocomplete clientes
+    const clienteInput = hasCliData ? `
+      <div style="position:relative;flex:1;min-width:180px">
+        <input id="lv-cli-inp" value="${lvCliente}" placeholder="Buscar cliente..." autocomplete="off"
+          style="width:100%;padding:5px 10px;border-radius:6px;border:1px solid var(--bdr2);background:var(--bg2);color:var(--text);font-size:12px;outline:none"
+          oninput="onLVCliInput(this.value)"/>
+        <div id="lv-cli-ac" style="position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--bdr2);border-radius:0 0 6px 6px;z-index:50;max-height:180px;overflow-y:auto;display:none"></div>
+      </div>
+      ${lvCliente?`<span class="tag tag-red" onclick="lvCliente='';rLibroV()" style="cursor:pointer">✕ ${lvCliente.slice(0,25)}...</span>`:''}
+    ` : '<span style="font-size:11px;color:var(--muted)">Ejecutar sync actualizado para filtrar por cliente</span>';
+
+    // Botones categoría
+    const catBtns=['', ...cats].map(c=>
+      `<button class="filter-btn${c===lvCat?' on':''}" style="font-size:11px;padding:3px 12px;${c===lvCat?'color:'+(LV_COLORS[c]||'var(--text)')+';border-color:'+(LV_COLORS[c]||'var(--text)')+';background:'+((LV_COLORS[c]||'#fff')+'22'):''}
+        " onclick="lvCat='${c}';rLibroV()">${c||'Todas'}</button>`
+    ).join('');
 
     mc.innerHTML=`
       <div class="kpis" style="margin-top:18px;grid-template-columns:repeat(3,minmax(0,1fr))">
-        <div class="kpi"><div class="kpi-l">Total ventas</div><div class="kpi-v">${fmtM(totAll)}</div><div class="kpi-s">${periodos.length} meses · ${cats.length} categorías</div></div>
+        <div class="kpi"><div class="kpi-l">Total ventas${lvCliente?' · '+lvCliente.split(' ')[0]:lvHolding?' · '+lvHolding:''}</div><div class="kpi-v">${fmtM(totAll)}</div><div class="kpi-s">${periodos.length} meses</div></div>
         <div class="kpi"><div class="kpi-l">Promedio mensual</div><div class="kpi-v">${fmtM(prom)}</div><div class="kpi-s">meses con datos</div></div>
-        <div class="kpi"><div class="kpi-l">Categoría líder</div><div class="kpi-v" style="font-size:14px;color:${LV_COLORS[topCat]||'var(--text)'}">${topCat}</div><div class="kpi-s">mayor volumen acumulado</div></div>
+        <div class="kpi"><div class="kpi-l">Categoría líder</div><div class="kpi-v" style="font-size:14px;color:${LV_COLORS[topCat]||'var(--text)'}">${topCat||'—'}</div><div class="kpi-s">mayor volumen</div></div>
       </div>
+
+      <!-- Filtros -->
+      <div class="card" style="padding:14px;margin-bottom:14px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Filtros</div>
+        <div class="filter-row" style="margin-bottom:8px">
+          <span style="font-size:11px;color:var(--muted);margin-right:6px">Holding:</span>
+          <button class="filter-btn${!lvHolding?' on':''}" style="font-size:11px;padding:3px 12px" onclick="lvHolding='';lvCliente='';rLibroV()">Todos</button>
+          ${holdingBtns}
+        </div>
+        <div class="filter-row" style="margin-bottom:8px;align-items:center">
+          <span style="font-size:11px;color:var(--muted);margin-right:6px">Cliente:</span>
+          ${clienteInput}
+        </div>
+        <div class="filter-row">
+          <span style="font-size:11px;color:var(--muted);margin-right:6px">Categoría:</span>
+          ${catBtns}
+        </div>
+      </div>
+
+      <!-- Toggle gráfico -->
       <div class="filter-row" style="margin-bottom:14px">
-        <button class="filter-btn ${lvMode==='linea'?'on':''}" onclick="lvMode='linea';rLibroV()">Línea — evolución</button>
-        <button class="filter-btn ${lvMode==='barras'?'on':''}" onclick="lvMode='barras';rLibroV()">Barras — composición</button>
+        <button class="filter-btn${lvMode==='linea'?' on':''}" onclick="lvMode='linea';rLibroV()">Línea — evolución</button>
+        <button class="filter-btn${lvMode==='barras'?' on':''}" onclick="lvMode='barras';rLibroV()">Barras — composición</button>
       </div>
+
       <div class="card">
         <div class="ch">
           <div>
             <div class="ct">${lvMode==='linea'?'Evolución mensual de ventas':'Composición mensual por categoría'}</div>
-            <div class="cs">${lvMode==='linea'?'Total M$ · '+periodos.length+' períodos':'Barras apiladas · M$ por categoría'}</div>
+            <div class="cs">${lvCliente||lvHolding?(lvCliente||lvHolding)+' · ':''}${lvCat?lvCat+' · ':''}M$ · ${periodos.length} períodos</div>
           </div>
           <div class="leg">
             ${lvMode==='linea'
-              ? '<span class="li"><span class="ll" style="background:var(--grn)"></span>Ventas M$</span>'
-              : cats.map(c=>`<span class="li"><span class="ll" style="background:${LV_COLORS[c]||'#7a7f94'}"></span>${c}</span>`).join('')
+              ?'<span class="li"><span class="ll" style="background:var(--grn)"></span>Ventas M$</span>'
+              :cats.filter(c=>!lvCat||c===lvCat).map(c=>`<span class="li"><span class="ll" style="background:${LV_COLORS[c]}"></span>${c}</span>`).join('')
             }
           </div>
         </div>
         <div class="cw" style="height:280px"><canvas id="cLV"></canvas></div>
       </div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:0">
         <div class="card" style="margin-bottom:0">
-          <div class="card-head"><div class="card-title">Resumen por categoría</div></div>
+          <div class="card-head"><div class="card-title">Mix por categoría</div></div>
           <table style="width:100%;border-collapse:collapse;font-size:12px">
             <thead style="background:var(--bg3)"><tr>
               <th style="padding:8px 12px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase">Categoría</th>
@@ -643,30 +705,27 @@ function rLibroV(){
               <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--muted)">Período</th>
               <th style="padding:7px 10px;text-align:right;font-size:10px;color:var(--muted)">Ventas M$</th>
             </tr></thead>
-            <tbody style="font-family:var(--mono)">${
-              periodos.map(p=>`<tr>
-                <td style="padding:7px 10px">${lblP(p)}</td>
-                <td style="padding:7px 10px;text-align:right">${pvT[p]>0?fmtM(pvT[p]):'—'}</td>
-              </tr>`).join('')
-            }</tbody>
+            <tbody style="font-family:var(--mono)">${periodos.map(p=>`<tr><td style="padding:7px 10px">${lblP(p)}</td><td style="padding:7px 10px;text-align:right">${pvT[p]>0?fmtM(pvT[p]):'—'}</td></tr>`).join('')}</tbody>
           </table></div>
         </div>
       </div>`;
+
+    // Autocomplete handler (definido inline para acceder a clientesFilt)
+    window._lvCliFilt = clientesFilt;
 
     // Chart
     if(lvChart){lvChart.destroy();lvChart=null;}
     const ctx=document.getElementById('cLV');
     if(!ctx) return;
+    const catsGraf = lvCat ? [lvCat] : cats;
 
     if(lvMode==='linea'){
       lvChart=new Chart(ctx,{
         type:'line',
         data:{labels:periodos.map(lblP),datasets:[{
-          label:'Ventas M$',
-          data:periodos.map(p=>Math.round((pvT[p]||0)/1e6*10)/10),
+          label:'Ventas M$',data:periodos.map(p=>Math.round((pvT[p]||0)/1e6*10)/10),
           borderColor:'var(--grn)',backgroundColor:'rgba(29,158,117,.08)',
-          borderWidth:2.5,pointBackgroundColor:'#1d9e75',
-          pointRadius:4,pointHoverRadius:7,tension:.35,fill:true
+          borderWidth:2.5,pointBackgroundColor:'#1d9e75',pointRadius:4,pointHoverRadius:7,tension:.35,fill:true
         }]},
         options:{responsive:true,maintainAspectRatio:false,
           interaction:{mode:'index',intersect:false},
@@ -675,22 +734,16 @@ function rLibroV(){
           scales:{
             x:{grid:{display:false},ticks:{color:'#7a7f94',font:{size:11}},border:{color:'rgba(255,255,255,.07)'}},
             y:{grid:{color:'rgba(255,255,255,.05)'},border:{display:false},ticks:{color:'#7a7f94',font:{size:11},callback:v=>'M$'+v}}
-          }
-        }
+          }}
       });
     } else {
-      const datasets=cats.map(c=>{
-        const color=LV_COLORS[c]||'#7a7f94';
-        return {
-          label:c,
-          data:periodos.map(p=>Math.round(((pvC[p]||{})[c]||0)/1e6*10)/10),
-          backgroundColor:color+'cc',borderRadius:2,stack:'s1',
-          barPercentage:.85,categoryPercentage:.9
-        };
-      });
       lvChart=new Chart(ctx,{
         type:'bar',
-        data:{labels:periodos.map(lblP),datasets},
+        data:{labels:periodos.map(lblP),datasets:catsGraf.map(c=>({
+          label:c,
+          data:periodos.map(p=>Math.round(((pvC[p]||{})[c]||0)/1e6*10)/10),
+          backgroundColor:(LV_COLORS[c]||'#7a7f94')+'cc',borderRadius:2,stack:'s1',barPercentage:.85,categoryPercentage:.9
+        }))},
         options:{responsive:true,maintainAspectRatio:false,
           interaction:{mode:'index',intersect:false},
           plugins:{
@@ -701,14 +754,25 @@ function rLibroV(){
           scales:{
             x:{stacked:true,grid:{display:false},ticks:{color:'#7a7f94',font:{size:10}},border:{color:'rgba(255,255,255,.07)'}},
             y:{stacked:true,grid:{color:'rgba(255,255,255,.05)'},border:{display:false},ticks:{color:'#7a7f94',font:{size:11},callback:v=>'M$'+v}}
-          }
-        }
+          }}
       });
     }
   }).catch(e=>{
     mc.innerHTML=`<div class="state-box"><span style="color:var(--red)">Error: ${e.message}</span></div>`;
   });
 }
+
+function onLVCliInput(v){
+  const ac=document.getElementById('lv-cli-ac');
+  if(!ac) return;
+  if(v.length<2){ac.style.display='none';return;}
+  const q=v.toLowerCase();
+  const filt=(window._lvCliFilt||[]).filter(c=>c.toLowerCase().includes(q)).slice(0,8);
+  if(!filt.length){ac.style.display='none';return;}
+  ac.innerHTML=filt.map(c=>`<div style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--bdr)" onmousedown="lvCliente='${c.replace(/'/g,"\'")}';rLibroV()" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">${c}</div>`).join('');
+  ac.style.display='block';
+}
+
 
 // ── INIT ──────────────────────────────────────────────────────
 document.getElementById('mc').innerHTML =
